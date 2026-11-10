@@ -9,8 +9,8 @@
 # alerts wake people up at night for nothing, alerts get muted, and the
 # alerting system is dead (alert fatigue).
 #
-# Thresholds come from the measured baseline in docs/metrics-design.md:
-# inference p95 ~ 86ms.
+# Thresholds come from a measured baseline (yolov8n on CPU, 20 samples):
+# inference p95 ~ 86ms. See the docstring of app/metrics.py.
 
 groups:
   # -----------------------------------------------------------------

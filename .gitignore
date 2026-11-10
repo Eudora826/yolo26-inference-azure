@@ -21,11 +21,9 @@ venv/
 *.mov
 *.mkv
 
-# docs/ holds only design docs and screenshots. Study notes live outside the
-# repo; if they are ever copied back for reference, these lines keep
-# git add -A from picking them up.
+# docs/ is published for README screenshots only. Anything else in docs/
+# (personal study notes) stays local and out of git.
 docs/*
-!docs/metrics-design.md
 !docs/images/
 
 # Scratch files from the dependency reconciliation
