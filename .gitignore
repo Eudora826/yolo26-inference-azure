@@ -8,6 +8,12 @@ venv/
 .DS_Store
 *.egg-info/
 
+# Local secrets (API keys, connection strings) stay out of git.
+# A placeholder-only .env.example may be committed to document the variables.
+.env
+.env.*
+!.env.example
+
 # 视频素材和标注产物：几 MB 的二进制不进版本库。
 # 测试用的视频由 tests/ 里的代码现场生成，loadgen 也是自己合成的。
 *.mp4

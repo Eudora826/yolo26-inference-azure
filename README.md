@@ -1,8 +1,12 @@
-# YOLO Inference Platform
+# YOLO26 Inference on Azure
 
-[![CI](https://github.com/Eudora826/yolo-inference-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Eudora826/yolo-inference-platform/actions/workflows/ci.yml)
+[![CI](https://github.com/Eudora826/yolo26-inference-azure/actions/workflows/ci.yml/badge.svg)](https://github.com/Eudora826/yolo26-inference-azure/actions/workflows/ci.yml)
 
-Production-shaped object detection as a service: **FastAPI + YOLOv8** with the
+> **Status:** the service currently runs YOLOv8 with PyTorch and is deployed
+> locally with Docker Compose. Moving to YOLO26 with ONNX Runtime and deploying
+> to Azure Container Apps are in progress; this note goes away once they land.
+
+Object detection as a service: **FastAPI + YOLOv8** with the
 observability a real deployment needs — Prometheus metrics, a provisioned
 Grafana dashboard, OpenTelemetry tracing through Jaeger, and alerting rules.
 
@@ -302,6 +306,13 @@ loadgen/        traffic generator (compose profile "demo")
 tests/          34 tests, including instrumentation and span assertions
 docs/           measurement baseline and metric design rationale
 ```
+
+## Lineage
+
+This repository continues two earlier versions, kept as snapshots:
+
+- [yolo-inference-service](https://github.com/Eudora826/yolo-inference-service): v1, a containerized FastAPI + YOLOv8 detection API.
+- [yolo-inference-platform](https://github.com/Eudora826/yolo-inference-platform): v2, which added Prometheus metrics, Grafana dashboards, OpenTelemetry tracing and alerting. This repository starts from its history.
 
 ## License
 
