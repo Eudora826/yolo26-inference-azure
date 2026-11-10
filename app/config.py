@@ -35,8 +35,13 @@ def rate_limit_per_minute() -> int:
     return int(os.getenv("RATE_LIMIT_PER_MINUTE", "0"))
 
 
+def storage_backend() -> str:
+    """Where job files are kept: "local" (the default)."""
+    return os.getenv("STORAGE_BACKEND", "local").strip().lower()
+
+
 def jobs_dir() -> str:
-    """Directory where video jobs store their input/output files."""
+    """Root directory of the local storage backend (video inputs and results)."""
     return os.getenv("JOBS_DIR", os.path.join(tempfile.gettempdir(), "yolo-jobs"))
 
 

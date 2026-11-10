@@ -177,7 +177,8 @@ Everything is an environment variable — no rebuild needed.
 | `RATE_LIMIT_PER_MINUTE` | `0` *(disabled)* | Per-client limit on inference endpoints |
 | `MAX_UPLOAD_MB` | `20` | Image upload size limit |
 | `MAX_VIDEO_UPLOAD_MB` | `200` | Video upload size limit |
-| `JOBS_DIR` | system temp dir | Where video jobs store files |
+| `STORAGE_BACKEND` | `local` | Where video inputs and results are kept (`local` only for now; Azure Blob is in progress) |
+| `JOBS_DIR` | system temp dir | Root directory of the `local` storage backend |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(empty = tracing off)* | OTLP gRPC endpoint, `host:port`, no scheme |
 | `OTEL_SERVICE_NAME` | `yolo-inference-platform` | Name reported to the tracing backend |
 

@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.storage import get_storage
 
 client = TestClient(app)
 
@@ -48,6 +49,20 @@ def test_video_job_lifecycle(tiny_video):
     assert result.status_code == 200
     assert result.headers["content-type"] == "video/mp4"
     assert len(result.content) > 0
+
+    # Both files went through the storage interface, and what the endpoint
+    # serves is exactly the stored result.
+    storage = get_storage()
+    assert b"".join(storage.get("{}/input.mp4".format(job_id)))
+    stored = b"".join(storage.get("{}/annotated.mp4".format(job_id)))
+    assert result.content == stored
+
+
+def test_result_missing_from_storage_returns_410(tiny_video):
+    job_id = submit(tiny_video).json()["job_id"]
+    get_storage().delete("{}/annotated.mp4".format(job_id))
+    response = client.get("/jobs/{}/result".format(job_id))
+    assert response.status_code == 410
 
 
 def test_unknown_job_returns_404():

@@ -22,7 +22,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image, UnidentifiedImageError
 
 from app import config, jobs, metrics, tracing
@@ -35,6 +35,7 @@ from app.schemas import (
     ModelInfo,
     PredictResponse,
 )
+from app.storage import StorageNotFound, get_storage
 
 logger = logging.getLogger("yolo-service")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -433,8 +434,18 @@ def job_result(job_id: str):
             status_code=409,
             detail="job is not completed (status: {})".format(job.status),
         )
-    return FileResponse(
-        job.output_path, media_type="video/mp4", filename="annotated.mp4"
+    try:
+        chunks = get_storage().get(job.output_key)
+    except StorageNotFound:
+        # The job says completed but the file is gone, e.g. removed from the
+        # storage backend by hand. Report it rather than serving an error page.
+        raise HTTPException(
+            status_code=410, detail="job result is no longer available"
+        ) from None
+    return StreamingResponse(
+        chunks,
+        media_type="video/mp4",
+        headers={"Content-Disposition": 'attachment; filename="annotated.mp4"'},
     )
 
 
