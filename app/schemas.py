@@ -29,11 +29,31 @@ class ImageSize(BaseModel):
     height: int
 
 
+class PredictParams(BaseModel):
+    """The parameters inference actually ran with, defaults included."""
+
+    conf: float = Field(examples=[0.25])
+    iou: float = Field(examples=[0.45])
+    max_det: int = Field(examples=[100])
+    classes: Optional[List[str]] = Field(
+        default=None, description="Class filter; null means all classes"
+    )
+
+
 class PredictResponse(BaseModel):
     model_config = {"protected_namespaces": ()}
 
     request_id: str
     model_version: str = Field(examples=["yolov8n.pt"])
+    model_sha256: str = Field(
+        description="First 12 hex chars of the weights file SHA-256",
+        examples=["f59b3d833e2f"],
+    )
+    git_sha: str = Field(
+        description="Commit the image was built from; 'unknown' if not set",
+        examples=["4e01368"],
+    )
+    params: PredictParams
     inference_time_ms: float
     image_size: ImageSize
     count: int

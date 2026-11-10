@@ -54,7 +54,7 @@ jobs:
       # 走的就是别人 clone 之后的真实路径 —— 先 wget 补上文件再构建，
       # 等于替用户把坑填了，然后看不见坑。
       - name: Build image
-        run: docker build -t yolo-inference:ci .
+        run: docker build --build-arg GIT_SHA=${{ github.sha }} -t yolo-inference:ci .
       - name: Report image size
         run: docker images yolo-inference:ci --format "{{.Repository}}:{{.Tag}}  {{.Size}}"
 

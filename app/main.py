@@ -43,7 +43,7 @@ app = FastAPI(
     title="YOLO Inference Service",
     description="Object detection as a service: single images, annotated "
     "previews, and async video jobs on top of YOLOv8.",
-    version="1.0.0",
+    version=config.service_version(),
 )
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -210,11 +210,18 @@ def decode_image(data: bytes) -> Image.Image:
         ) from exc
 
 
-def parse_classes(classes: Optional[str]) -> Optional[List[int]]:
-    """Turn 'person,dog' into model class ids; 400 on unknown names."""
+def parse_class_names(classes: Optional[str]) -> Optional[List[str]]:
+    """Turn 'person, dog' into ['person', 'dog']; None when no filter is set."""
     if not classes:
         return None
-    names = [c.strip() for c in classes.split(",") if c.strip()]
+    return [c.strip() for c in classes.split(",") if c.strip()] or None
+
+
+def parse_classes(classes: Optional[str]) -> Optional[List[int]]:
+    """Turn 'person,dog' into model class ids; 400 on unknown names."""
+    names = parse_class_names(classes)
+    if not names:
+        return None
     try:
         return get_detector().class_ids_for(names)
     except ValueError as exc:
@@ -289,9 +296,20 @@ async def predict(
         current.set_attribute("detections.count", len(detections))
     metrics.observe_inference(detections, elapsed_ms, "image")
 
+    detector = get_detector()
     return {
         "request_id": request.state.request_id,
-        "model_version": os.path.basename(get_detector().model_path),
+        "model_version": os.path.basename(detector.model_path),
+        "model_sha256": detector.sha256,
+        "git_sha": config.git_sha(),
+        # Echo what inference actually used, so a response still explains
+        # itself after the server-side defaults change.
+        "params": {
+            "conf": conf,
+            "iou": iou,
+            "max_det": max_det,
+            "classes": parse_class_names(classes),
+        },
         "inference_time_ms": round(elapsed_ms, 2),
         "image_size": {"width": image.width, "height": image.height},
         "count": len(detections),

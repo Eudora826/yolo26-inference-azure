@@ -66,3 +66,13 @@ def service_name() -> str:
 
 def service_version() -> str:
     return os.getenv("SERVICE_VERSION", SERVICE_VERSION)
+
+
+def git_sha() -> str:
+    """Commit the running code was built from.
+
+    Baked into the image at build time (Dockerfile ARG GIT_SHA), because the
+    image has neither a .git directory nor the git binary to ask at runtime.
+    "unknown" means the build did not pass it, e.g. tests or a bare uvicorn.
+    """
+    return os.getenv("GIT_SHA", "") or "unknown"

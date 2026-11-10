@@ -1,3 +1,5 @@
+import hashlib
+import os
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -9,6 +11,9 @@ class Detector:
         # yolov8n is the smallest model; weights download on first use.
         self.model_path = model_path
         self.model = YOLO(model_path)
+        # A file name is only a label: the same name can hold different
+        # weights after a re-export. The content hash identifies them.
+        self.sha256 = _file_sha256(model_path)
 
     @property
     def names(self) -> Dict[int, str]:
@@ -48,3 +53,14 @@ class Detector:
                     "bbox": [round(float(x), 2) for x in box.xyxy[0]],
                 })
         return detections, elapsed_ms
+
+
+def _file_sha256(path: str, length: int = 12) -> str:
+    """Short SHA-256 of a weights file, or "unknown" if it is not on disk."""
+    if not os.path.isfile(path):
+        return "unknown"
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()[:length]

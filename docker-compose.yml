@@ -20,7 +20,13 @@ services:
   # 被观测的对象
   # ---------------------------------------------------------------------
   yolo-service:
-    build: .
+    build:
+      context: .
+      args:
+        # Passed in from the shell, e.g. in PowerShell first run
+        # $env:GIT_SHA = git rev-parse --short HEAD
+        # Without it the value is "unknown", and responses say so.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: yolo-inference:local
     ports:
       - "8000:8000"

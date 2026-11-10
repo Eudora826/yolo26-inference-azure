@@ -40,6 +40,12 @@ COPY --chown=appuser:appuser app/ ./app/
 
 COPY --from=builder --chown=appuser:appuser /weights/yolov8n.pt ./yolov8n.pt
 
+# The commit this image was built from, reported in every /predict response.
+# Declared last on purpose: a new value only rebuilds the layers after it,
+# so the dependency layers above stay cached.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 USER appuser
 
 EXPOSE 8000

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import cv2
@@ -67,12 +68,33 @@ def test_predict_response_shape():
     body = response.json()
     assert body["count"] == len(body["detections"])
     assert body["model_version"] == "yolov8n.pt"
+    assert re.fullmatch(r"[0-9a-f]{12}", body["model_sha256"])
+    # Tests run without a build, so nothing sets GIT_SHA.
+    assert body["git_sha"] == "unknown"
     assert body["inference_time_ms"] > 0
     assert body["image_size"] == {"width": width, "height": height}
     assert body["request_id"] == response.headers["x-request-id"]
     for det in body["detections"]:
         assert set(det) == {"class", "confidence", "bbox"}
         assert len(det["bbox"]) == 4
+
+
+def test_predict_echoes_default_params():
+    body = post_predict(sample_bytes()).json()
+    assert body["params"] == {
+        "conf": 0.25, "iou": 0.45, "max_det": 100, "classes": None,
+    }
+
+
+def test_predict_echoes_requested_params(monkeypatch):
+    monkeypatch.setenv("GIT_SHA", "abc1234")
+    body = post_predict(
+        sample_bytes(), conf=0.9, iou=0.3, max_det=5, classes="cat, dog"
+    ).json()
+    assert body["params"] == {
+        "conf": 0.9, "iou": 0.3, "max_det": 5, "classes": ["cat", "dog"],
+    }
+    assert body["git_sha"] == "abc1234"
 
 
 def test_sample_image_actually_detects_something():
