@@ -1,26 +1,30 @@
-# 告警规则。
+# Alert rules.
 #
-# 原则：告警"症状"，不告警"原因"。CPU 100% 但用户无感知 → 噪音；
-# CPU 30% 但请求全在超时 → CPU 告警什么也抓不到。每条规则都要能回答
-# 「这条响的时候，用户是不是真的受影响了」。
+# Principle: alert on symptoms, not causes. CPU at 100% with no user impact is
+# noise; CPU at 30% while every request times out is something a CPU alert
+# never catches. Every rule should answer "when this fires, are users actually
+# affected?".
 #
-# 每条都有 `for`：指标天然抖动，没有持续时间约束就会被半夜的假警报
-# 炸醒，然后你会关掉告警，然后告警系统就死了（alert fatigue）。
+# Every rule has a `for`: metrics jitter naturally, and without a duration the
+# alerts wake people up at night for nothing, alerts get muted, and the
+# alerting system is dead (alert fatigue).
 #
-# 阈值来自 docs/metrics-design.md 里的实测基线：推理 p95 ≈ 86ms。
+# Thresholds come from the measured baseline in docs/metrics-design.md:
+# inference p95 ~ 86ms.
 
 groups:
   # -----------------------------------------------------------------
-  # 记录规则：把反复用到的复杂查询预计算成新指标。
-  # 命名约定是 level:metric:operation。
+  # Recording rules: precompute complex, frequently used queries as new metrics.
+  # Naming convention: level:metric:operation.
   # -----------------------------------------------------------------
   - name: yolo-recording
     interval: 15s
     rules:
-      # `or vector(0)` 是必需的，不是装饰：没有任何 5xx 时分子匹配不到
-      # 序列，返回的是**空向量**而不是 0，而空向量参与除法结果还是空。
-      # 没有它，服务完全健康时这条规则（以及用它的面板）显示的是
-      # "No data" 而不是 "0%" —— 最该让人安心的时刻反而看起来像坏了。
+      # `or vector(0)` is required, not decoration: with no 5xx at all the
+      # numerator matches no series and returns an **empty vector**, not 0,
+      # and dividing an empty vector is still empty. Without it, this rule
+      # (and the panels using it) shows "No data" instead of "0%" while the
+      # service is perfectly healthy, which is exactly when it should reassure.
       - record: job:http_error_rate:ratio5m
         expr: |
           (sum(rate(http_requests_total{status=~"5.."}[5m])) or vector(0))
@@ -43,8 +47,9 @@ groups:
   - name: yolo-alerts
     rules:
       # ---------------------------------------------------------------
-      # 服务不可用。`up` 是 Prometheus 自动生成的：抓取成功 1，失败 0。
-      # for 只给 2 分钟 —— 服务挂了是最紧急的症状，不需要长时间确认。
+      # Service unavailable. Prometheus generates `up` itself: 1 if the
+      # scrape succeeded, 0 if not. Only 2 minutes of `for`: a dead service
+      # is the most urgent symptom and needs no long confirmation.
       # ---------------------------------------------------------------
       - alert: ServiceDown
         expr: up{job="yolo-service"} == 0
@@ -52,12 +57,13 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "YOLO 服务抓不到了（{{ $labels.instance }}）"
-          description: "Prometheus 已连续 2 分钟无法抓取 {{ $labels.instance }}/metrics，服务可能已崩溃或网络不通。"
+          summary: "YOLO service cannot be scraped ({{ $labels.instance }})"
+          description: "Prometheus has failed to scrape {{ $labels.instance }}/metrics for 2 minutes; the service may have crashed or be unreachable."
 
       # ---------------------------------------------------------------
-      # 只算 5xx。4xx 是客户端传了坏数据，服务正确地拒绝了它 ——
-      # 那是功能不是故障，不该半夜叫醒任何人。
+      # 5xx only. A 4xx means the client sent bad data and the service
+      # correctly rejected it: that is a feature, not a failure, and should
+      # not wake anyone at night.
       # ---------------------------------------------------------------
       - alert: HighErrorRate
         expr: job:http_error_rate:ratio5m > 0.05
@@ -65,13 +71,14 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "5xx 错误率 {{ $value | humanizePercentage }}（阈值 5%）"
-          description: "服务端错误率已持续 5 分钟高于 5%，用户正在遇到失败请求。"
+          summary: "5xx error rate {{ $value | humanizePercentage }} (threshold 5%)"
+          description: "The server-side error rate has been above 5% for 5 minutes; users are seeing failed requests."
 
       # ---------------------------------------------------------------
-      # 基线 p95 ≈ 86ms，阈值定 500ms ≈ 6 倍余量。
-      # 留这么宽是为了容纳容器化开销和并发争抢，只有真正劣化才触发。
-      # 拍一个"好看的整数"当阈值是新手最常犯的错。
+      # Baseline p95 ~ 86ms; the 500ms threshold leaves ~6x headroom.
+      # That much room absorbs container overhead and contention, so only a
+      # real degradation fires. Picking a round number as the threshold is a
+      # classic beginner mistake.
       # ---------------------------------------------------------------
       - alert: InferenceLatencyHigh
         expr: job:inference_duration_seconds:p95 > 0.5
@@ -79,12 +86,13 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "推理 p95 达到 {{ $value | humanizeDuration }}（基线 ~86ms，阈值 500ms）"
-          description: "模型推理明显变慢。查 Jaeger 里最慢的几条 trace，看是推理本身还是解码变慢了。"
+          summary: "Inference p95 reached {{ $value | humanizeDuration }} (baseline ~86ms, threshold 500ms)"
+          description: "Model inference is clearly slower. Check the slowest traces in Jaeger to see whether inference itself or decoding slowed down."
 
       # ---------------------------------------------------------------
-      # 积压只能靠 Gauge 看见：提交任务的那个 HTTP 请求永远是几十毫秒，
-      # 后台堆了 50 个任务，请求延迟依然一片祥和。
+      # A backlog is only visible through a gauge: the HTTP request that
+      # submits a job always takes tens of milliseconds, so request latency
+      # looks calm even with 50 jobs piled up in the background.
       # ---------------------------------------------------------------
       - alert: VideoJobBacklog
         expr: video_jobs_active > 5
@@ -92,13 +100,14 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "视频任务积压 {{ $value }} 个，已持续 15 分钟"
-          description: "后台任务的消费速度跟不上提交速度。单进程的 BackgroundTasks 没有横向扩展能力，考虑上任务队列。"
+          summary: "{{ $value }} video jobs backed up for 15 minutes"
+          description: "Background jobs are consumed more slowly than they are submitted. Single-process BackgroundTasks cannot scale out; consider a task queue."
 
       # ---------------------------------------------------------------
-      # 任务失败在 HTTP 指标里完全看不见：POST /videos 返回的是 202，
-      # 失败发生在响应之后，没有任何请求会返回 5xx。
-      # 后半段 `and` 是防止样本太少时被单次失败触发。
+      # Job failures are invisible in HTTP metrics: POST /videos returns 202
+      # and the failure happens after the response, so no request ever
+      # returns a 5xx. The second `and` clause keeps a single failure from
+      # firing the alert when there are very few samples.
       # ---------------------------------------------------------------
       - alert: VideoJobFailureRate
         expr: |
@@ -113,14 +122,16 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "视频任务失败率 {{ $value | humanizePercentage }}（阈值 20%）"
-          description: "后台标注任务大量失败。这个故障不会产生任何 5xx，只有这个指标能发现。"
+          summary: "Video job failure rate {{ $value | humanizePercentage }} (threshold 20%)"
+          description: "Many background annotation jobs are failing. This failure produces no 5xx; only this metric can catch it."
 
       # ---------------------------------------------------------------
-      # 数据漂移哨兵。平时每张图 3-5 个目标，掉到 0.5 以下说明输入或
-      # 模型出了问题：摄像头坏了、模型文件被换了、阈值被改错了。
-      # 这类故障延迟正常、错误率为零，只有业务指标能发现。
-      # `and` 那段保证有足够流量才判断，否则没流量时会误报。
+      # Data drift sentinel. Normally 3-5 objects per image; below 0.5 means
+      # something is wrong with the input or the model: a broken camera, a
+      # swapped model file, a misconfigured threshold. Latency stays normal
+      # and the error rate stays at zero, so only a business metric catches
+      # it. The `and` clause requires enough traffic, to avoid false alarms
+      # when there is none.
       # ---------------------------------------------------------------
       - alert: DetectionRateCollapse
         expr: |
@@ -131,12 +142,13 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "平均每张图只检测出 {{ $value | printf \"%.2f\" }} 个目标"
-          description: "检测数骤降，但服务本身没有报错。检查输入数据源和当前加载的模型（看 model_info 指标）。"
+          summary: "Only {{ $value | printf \"%.2f\" }} objects detected per image on average"
+          description: "Detections dropped sharply while the service reports no errors. Check the input source and the currently loaded model (see the model_info metric)."
 
       # ---------------------------------------------------------------
-      # 限流大量触发：可能是有人在压测，也可能是限流阈值配低了。
-      # severity 只给 info —— 它需要有人看一眼，但不需要立刻处理。
+      # Heavy rate limiting: someone may be load testing, or the limit may be
+      # set too low. Severity is only info: someone should take a look, but
+      # nothing needs immediate action.
       # ---------------------------------------------------------------
       - alert: RateLimitingActive
         expr: sum(rate(rate_limited_requests_total[5m])) > 0.5
@@ -144,5 +156,5 @@ groups:
         labels:
           severity: info
         annotations:
-          summary: "限流每秒拦截 {{ $value | printf \"%.2f\" }} 个请求"
-          description: "有客户端持续触发限流。确认是异常流量还是 RATE_LIMIT_PER_MINUTE 设得太紧。"
+          summary: "Rate limiting is blocking {{ $value | printf \"%.2f\" }} requests per second"
+          description: "A client keeps hitting the rate limit. Check whether the traffic is abnormal or RATE_LIMIT_PER_MINUTE is too tight."

@@ -7,15 +7,16 @@ on:
     branches: [main]
 
 env:
-  # 权重不进 git（6.3 MB 二进制），构建和测试时按需下载
+  # Weights stay out of git (6.3 MB binary) and are downloaded when needed
   WEIGHTS_URL: https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
 
-# 运行器钉死在 ubuntu-24.04，不用 ubuntu-latest：那个标签会随 GitHub
-# 的节奏滚动（2026-10-19 起滚到 Ubuntu 26），意味着某天早上 CI 会在
-# 你一行代码都没改的情况下变红。可复现性比"永远最新"重要。
+# Runners are pinned to ubuntu-24.04 rather than ubuntu-latest: that label
+# moves on GitHub's schedule (to Ubuntu 26 from 2026-10-19), so CI could turn
+# red one morning without a single code change. Reproducibility beats
+# "always latest".
 
 jobs:
-  # 最快的先跑，失败得早，省 CI 时间也省你的时间
+  # Fastest job first: failing early saves CI time and yours
   lint:
     runs-on: ubuntu-24.04
     steps:
@@ -33,7 +34,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          # 不缓存的话每次都要重新下 200 MB 的 torch
+          # Without the cache, every run downloads 200 MB of torch again
           cache: pip
           cache-dependency-path: |
             requirements.txt
@@ -50,24 +51,26 @@ jobs:
     needs: [lint, test]
     steps:
       - uses: actions/checkout@v4
-      # 刻意不预先下载权重：Dockerfile 自己在构建时拉。这样这个 job
-      # 走的就是别人 clone 之后的真实路径 —— 先 wget 补上文件再构建，
-      # 等于替用户把坑填了，然后看不见坑。
+      # Deliberately no weights download here: the Dockerfile fetches them
+      # itself. This job then follows the same path as a fresh clone; fetching
+      # the file first would quietly cover up the problem users would hit.
       - name: Build image
         run: docker build --build-arg GIT_SHA=${{ github.sha }} -t yolo-inference:ci .
       - name: Report image size
         run: docker images yolo-inference:ci --format "{{.Repository}}:{{.Tag}}  {{.Size}}"
 
-  # 单元测试保证代码逻辑对，冒烟测试保证**整套东西真的能跑起来**。
-  # 这个 job 抓的是单元测试碰不到的一整类问题：服务名写错、端口写错、
-  # 挂载路径写错、healthcheck 写错、Grafana provisioning 路径写错。
+  # Unit tests check the code logic; the smoke test checks that the **whole
+  # stack actually runs**. It catches a class of problems unit tests cannot
+  # see: a wrong service name, port, mount path, healthcheck, or Grafana
+  # provisioning path.
   smoke:
     runs-on: ubuntu-24.04
     needs: build
     steps:
       - uses: actions/checkout@v4
 
-      # 同上：从一个干净的 checkout 直接起栈，和 README 教的命令一模一样。
+      # Same idea: start the stack from a clean checkout with the exact
+      # command the README gives.
       - name: Start the stack
         run: docker compose up -d --build
 
@@ -86,7 +89,7 @@ jobs:
           for i in $(seq 1 5); do
             curl -sf -X POST "http://localhost:8000/predict" -F "file=@cat.jpg" > /dev/null
           done
-          # 故意来一个坏请求，确认错误路径也被记录
+          # One deliberately bad request, so the error path is recorded too
           curl -s -o /dev/null -X POST "http://localhost:8000/predict" \
             -F "file=@README.md;type=text/plain"
 
@@ -101,19 +104,21 @@ jobs:
 
       - name: Prometheus is actually scraping the service
         run: |
-          # 光 curl 一下 /health 不够 —— 要确认 Prometheus 真的抓到了数据。
-          # 这一步才是这个 job 存在的理由。
+          # Curling /health is not enough: this checks that Prometheus
+          # actually scraped data. That is why this job exists.
           #
-          # 两处防御，都是被真实的 CI 失败教出来的：
+          # Two safeguards, both learned from real CI failures:
           #
-          #  1. 整个管道放进 `if` 里。GitHub Actions 用 bash -e 跑脚本，
-          #     而 `if` 中的命令失败**不触发** -e。早先的版本把 curl 的
-          #     输出喂给 python 解析，Prometheus 还没完成首次抓取时
-          #     curl 返回空、python 抛 JSONDecodeError，整个步骤在
-          #     0.2 秒内就被 -e 杀掉 —— 重试循环一次都没转完。
+          #  1. The whole pipeline sits inside `if`. GitHub Actions runs
+          #     scripts with bash -e, and a failing command inside `if`
+          #     does **not** trigger -e. An earlier version piped curl's
+          #     output into python; before Prometheus finished its first
+          #     scrape, curl returned nothing, python raised
+          #     JSONDecodeError, and -e killed the step within 0.2 seconds,
+          #     before the retry loop completed a single pass.
           #
-          #  2. 用 -G --data-urlencode 让 curl 去编码 {} 和引号，
-          #     而不是把裸字符塞进 URL。
+          #  2. -G --data-urlencode lets curl encode {} and the quotes,
+          #     instead of putting raw characters in the URL.
           for i in $(seq 1 30); do
             if curl -s -G 'http://localhost:9090/api/v1/query' \
                  --data-urlencode 'query=up{job="yolo-service"}' \
@@ -149,7 +154,7 @@ jobs:
           done
           echo "jaeger never saw the service"; exit 1
 
-      # 没有这一步的话，CI 挂了你完全不知道为什么
+      # Without this step, a failed run gives no clue why
       - name: Dump logs on failure
         if: failure()
         run: docker compose logs --tail=200

@@ -1,23 +1,24 @@
-# 完整的可观测性栈。
+# The full observability stack.
 #
-#   docker compose up --build                  服务 + 监控（安静，不吃 CPU）
-#   docker compose --profile demo up --build   再加上负载生成器（大盘立刻有数据）
+#   docker compose up --build                  service + monitoring (quiet, low CPU)
+#   docker compose --profile demo up --build   plus the load generator (dashboards fill at once)
 #
-# 端口：
-#   8000   YOLO 服务（Web Demo / OpenAPI / /metrics）
-#   9090   Prometheus（targets、PromQL、告警）
-#   3000   Grafana（大盘，匿名可看）
-#   16686  Jaeger（链路追踪）
+# Ports:
+#   8000   YOLO service (web demo / OpenAPI / /metrics)
+#   9090   Prometheus (targets, PromQL, alerts)
+#   3000   Grafana (dashboards, anonymous read access)
+#   16686  Jaeger (tracing)
 #
-# 架构决策：指标走 Prometheus 直抓，链路走 OTel Collector。
-# 指标是服务对自身健康的自述，必须在 docker run 单跑时也存在；
-# 链路本来就需要后端聚合才有意义，走 Collector 才能解耦后端。
+# Design choice: Prometheus scrapes metrics directly, traces go through the
+# OTel Collector. Metrics are the service's own account of its health and
+# must exist even under a bare docker run; traces only make sense once a
+# backend aggregates them, and the Collector decouples that backend.
 
 name: yolo-inference-platform
 
 services:
   # ---------------------------------------------------------------------
-  # 被观测的对象
+  # The service being observed
   # ---------------------------------------------------------------------
   yolo-service:
     build:
@@ -31,45 +32,47 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # 有值才启用追踪。不设这个变量时 tracing.py 全程是空操作，
-      # 所以镜像可以脱离整套栈单独 docker run。
+      # Tracing is enabled only when this is set. Without it tracing.py does
+      # nothing, so the image can also run on its own with docker run.
       OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
       OTEL_SERVICE_NAME: yolo-inference-platform
       JOB_RETENTION_MINUTES: "60"
     healthcheck:
-      # 镜像是 slim，没有 curl；用自带的 Python 反而更可靠。
-      # 这里的 localhost 指容器自己，是对的。
+      # The slim image has no curl; the bundled Python is more reliable anyway.
+      # localhost here is the container itself, which is what we want.
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s
       timeout: 3s
       retries: 10
-      # 宽限期：这段时间内失败不计入 retries。import torch 要好几秒。
+      # Grace period: failures during it do not count towards retries.
+      # Importing torch takes several seconds.
       start_period: 40s
     depends_on:
       - otel-collector
 
   # ---------------------------------------------------------------------
-  # 指标：Prometheus 主动抓 yolo-service 的 /metrics
+  # Metrics: Prometheus scrapes /metrics on yolo-service
   # ---------------------------------------------------------------------
   prometheus:
     image: prom/prometheus:v3.1.0
     ports:
       - "9090:9090"
     volumes:
-      # 挂整个目录（prometheus.yml + alerts.yml），只读
+      # Mount the whole directory (prometheus.yml + alerts.yml), read-only
       - ./deploy/prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=7d
-      # 允许 curl -X POST /-/reload 热加载配置，省掉重启
+      # Allows curl -X POST /-/reload to reload config without a restart
       - --web.enable-lifecycle
     depends_on:
       - yolo-service
 
   # ---------------------------------------------------------------------
-  # 大盘：数据源和面板都由配置文件声明，启动即存在
+  # Dashboards: data source and panels are declared in config files and
+  # exist as soon as Grafana starts
   # ---------------------------------------------------------------------
   grafana:
     image: grafana/grafana:11.5.1
@@ -78,12 +81,13 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
-      # 本地 demo 才这么做：别人 clone 下来不用登录就能看大盘，截图也方便。
-      # 这个栈不暴露公网，所以可以接受。
+      # Local demo only: anyone who clones the repo can view the dashboards
+      # without logging in, which also makes screenshots easy. Acceptable
+      # because this stack is never exposed to the internet.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_USERS_DEFAULT_THEME: dark
-      # 打开链接直接落到我们的大盘，而不是 Grafana 首页
+      # Opening the link lands on our dashboard instead of the Grafana home page
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/yolo-service.json
     volumes:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -92,24 +96,26 @@ services:
       - prometheus
 
   # ---------------------------------------------------------------------
-  # 链路：应用 --OTLP--> Collector --> Jaeger
+  # Traces: app --OTLP--> Collector --> Jaeger
   #
-  # 为什么中间要有 Collector：换后端（Jaeger→Tempo）只改这里的配置，
-  # 应用一行不动、不用重新部署；还能做批处理、脱敏、尾部采样。
+  # Why a Collector in between: switching backends (Jaeger -> Tempo) only
+  # changes the config here, with no app change or redeploy; it can also
+  # batch, redact and tail-sample.
   # ---------------------------------------------------------------------
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.117.0
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - ./deploy/otel-collector/config.yaml:/etc/otel-collector-config.yaml:ro
-    # 刻意不发布 4317 到宿主机。yolo-service 通过 compose 网络的服务名
-    # 直接访问 otel-collector:4317，容器之间通信**不需要** ports 映射 ——
-    # ports 只是为了让宿主机（你的浏览器、curl）能看见。
+    # Port 4317 is deliberately not published to the host. yolo-service
+    # reaches otel-collector:4317 by service name on the compose network;
+    # container-to-container traffic does **not** need a ports mapping, which
+    # only exists so the host (your browser, curl) can reach a container.
     #
-    # 而且 Windows 常常把 4317 划进保留端口段（Hyper-V/WinNAT 的动态端口
-    # 排除范围），发布它会直接报
-    # "bind: An attempt was made to access a socket in a way forbidden..."。
-    # 真要从宿主机调试，换一个高位端口：- "14317:4317"
+    # Windows also often reserves 4317 (part of the Hyper-V/WinNAT dynamic
+    # port exclusion range), and publishing it fails with
+    # "bind: An attempt was made to access a socket in a way forbidden...".
+    # To debug from the host, use a high port instead: - "14317:4317"
     depends_on:
       - jaeger
 
@@ -121,11 +127,12 @@ services:
       COLLECTOR_OTLP_ENABLED: "true"
 
   # ---------------------------------------------------------------------
-  # 负载生成器：默认不启动（profile），因为 YOLO 推理很吃 CPU
+  # Load generator: off by default (profile), because YOLO inference is
+  # CPU-heavy
   # ---------------------------------------------------------------------
   loadgen:
     build:
-      # 上下文是仓库根目录，这样 Dockerfile 才能 COPY 到 cat.jpg
+      # The context is the repo root so the Dockerfile can COPY cat.jpg
       context: .
       dockerfile: loadgen/Dockerfile
     profiles: ["demo"]
@@ -136,8 +143,9 @@ services:
       VIDEO_EVERY_SECONDS: "240"
     depends_on:
       yolo-service:
-        # 长语法 + service_healthy 才是"等服务真的能用"。
-        # 短语法 depends_on: [yolo-service] 只等容器启动，不等健康检查通过。
+        # The long syntax with service_healthy waits until the service is
+        # actually usable. The short form depends_on: [yolo-service] only
+        # waits for the container to start, not for the healthcheck.
         condition: service_healthy
 
 volumes:

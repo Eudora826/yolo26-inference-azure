@@ -11,15 +11,16 @@ COPY requirements.txt .
 
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# 权重在构建时拉取，不进 git —— 6.3 MB 的二进制一旦提交就永久留在
-# 历史里，而 Ultralytics 已经把它托管在 Releases 上了。
+# The weights are fetched at build time and kept out of git: a 6.3 MB binary,
+# once committed, stays in the history forever, and Ultralytics already
+# hosts it on its Releases page.
 #
-# 在这里下载（而不是 COPY 一个本地文件）是为了让 clone 之后直接
-# `docker compose up --build` 就能跑。早先的版本 COPY 一个被
-# .gitignore 挡住的文件，于是任何人照 README 跑第一条命令就会失败 ——
-# 而 CI 因为每个 job 都先 wget 补上了文件，完全看不出这个问题。
+# Downloading here (instead of copying a local file) means a fresh clone runs
+# with `docker compose up --build` directly. An earlier version copied a file
+# that .gitignore excluded, so the first README command failed for anyone who
+# tried it, and CI never noticed because every job fetched the file first.
 #
-# ADD 原生支持远程 URL，不用再装 curl 或 wget。
+# ADD supports remote URLs natively, so curl or wget is not needed.
 ARG WEIGHTS_URL=https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
 ADD ${WEIGHTS_URL} /weights/yolov8n.pt
 

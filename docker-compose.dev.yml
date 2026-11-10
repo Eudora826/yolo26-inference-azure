@@ -1,21 +1,24 @@
-# 开发覆盖层。日常改代码时用：
+# Development overlay, for day-to-day code changes:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 #
-# 镜像仍然由 Dockerfile 构建（依赖、系统库、非 root 用户全部保留），
-# 只是把 app/ 换成你磁盘上的目录，改代码存盘即生效，不用 rebuild。
+# The image is still built from the Dockerfile (dependencies, system libraries
+# and the non-root user all stay); only app/ is replaced by the directory on
+# your disk, so a saved change takes effect without a rebuild.
 #
-# 故意不叫 docker-compose.override.yml —— 那个文件 compose 会自动加载，
-# 别人只想跑个 demo 却会莫名进入开发模式。显式指定更好。
+# Deliberately not named docker-compose.override.yml: compose loads that file
+# automatically, and someone who only wants the demo would end up in dev mode
+# without knowing why. Opting in explicitly is better.
 
 services:
   yolo-service:
     volumes:
-      # Dockerfile 里 WORKDIR 是 /app，app 包在 /app/app
+      # WORKDIR in the Dockerfile is /app, so the app package lives at /app/app
       - ./app:/app/app
     environment:
-      # Windows 的文件改动事件传不进 Linux 容器，--reload 会完全不触发。
-      # 轮询费一点 CPU，但这是唯一可靠的办法。
+      # File change events from Windows do not reach a Linux container, so
+      # --reload never fires. Polling costs a little CPU but is the only
+      # reliable option.
       WATCHFILES_FORCE_POLLING: "true"
     command:
       - uvicorn

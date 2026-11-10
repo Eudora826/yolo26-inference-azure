@@ -1,8 +1,8 @@
-# 仓库里一律存 LF。服务跑在 Linux 容器里，行尾混乱会咬人 ——
-# 最典型的是将来加了 shell 脚本，CRLF 会让 #!/bin/sh 变成 "bad interpreter"。
+# Store everything as LF. The service runs in Linux containers, where mixed
+# line endings bite: a shell script with CRLF fails with "bad interpreter".
 * text=auto eol=lf
 
-# 二进制文件绝不做行尾转换，否则文件会被损坏
+# Never convert line endings in binary files; it would corrupt them
 *.pt   binary
 *.jpg  binary
 *.jpeg binary
