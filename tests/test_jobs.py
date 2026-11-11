@@ -1,4 +1,5 @@
 import cv2
+import httpx
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -63,6 +64,28 @@ def test_result_missing_from_storage_returns_410(tiny_video):
     get_storage().delete("{}/annotated.mp4".format(job_id))
     response = client.get("/jobs/{}/result".format(job_id))
     assert response.status_code == 410
+
+
+def test_video_job_lifecycle_on_blob(tiny_video, monkeypatch, azurite, blob_container):
+    # The acceptance test for phase 1: upload -> process -> result in Blob ->
+    # download, with nothing changed but environment variables.
+    monkeypatch.setenv("STORAGE_BACKEND", "blob")
+    monkeypatch.setenv("AZURE_STORAGE_CONNECTION_STRING", azurite)
+    monkeypatch.setenv("STORAGE_CONTAINER", blob_container)
+
+    job_id = submit(tiny_video).json()["job_id"]
+    assert client.get("/jobs/{}".format(job_id)).json()["status"] == "completed"
+
+    # Blob can serve the file itself, so the API redirects to a SAS link
+    # instead of streaming the video through the service.
+    result = client.get("/jobs/{}/result".format(job_id), follow_redirects=False)
+    assert result.status_code == 307
+    download = httpx.get(result.headers["location"])
+    assert download.status_code == 200
+    assert download.headers["content-type"] == "video/mp4"
+
+    stored = b"".join(get_storage().get("{}/annotated.mp4".format(job_id)))
+    assert download.content == stored and len(stored) > 0
 
 
 def test_unknown_job_returns_404():

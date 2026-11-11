@@ -6,17 +6,26 @@ fixture's params.
 """
 
 import io
+from urllib.parse import urlsplit
 
+import httpx
 import pytest
 
 from app.storage import LocalStorage, StorageNotFound, get_storage
 from app.storage.base import CHUNK_SIZE
 
 
-@pytest.fixture(params=["local"])
+@pytest.fixture(params=["local", "blob"])
 def storage(request, tmp_path):
     if request.param == "local":
         return LocalStorage(str(tmp_path / "store"))
+    if request.param == "blob":
+        # Fixtures first: they skip (or fail in CI) when Azurite is missing.
+        connection_string = request.getfixturevalue("azurite")
+        container = request.getfixturevalue("blob_container")
+        from app.storage.blob import BlobStorage
+
+        return BlobStorage(connection_string, container)
     raise AssertionError("unknown backend " + request.param)
 
 
@@ -90,6 +99,51 @@ def test_local_has_no_download_url(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Blob backend specifics (Azurite)
+# ---------------------------------------------------------------------------
+
+
+def test_blob_sas_url_downloads_the_object(azurite, blob_container):
+    from app.storage.blob import BlobStorage
+
+    store = BlobStorage(azurite, blob_container)
+    store.put("job1/annotated.mp4", io.BytesIO(b"fake video bytes"))
+    url = store.url("job1/annotated.mp4", expires_in=60)
+
+    response = httpx.get(url)
+    assert response.status_code == 200
+    assert response.content == b"fake video bytes"
+    # Set at upload time, so the browser treats it as a video download.
+    assert response.headers["content-type"] == "video/mp4"
+    assert "annotated.mp4" in response.headers["content-disposition"]
+
+
+def test_blob_sas_url_is_read_only(azurite, blob_container):
+    from app.storage.blob import BlobStorage
+
+    store = BlobStorage(azurite, blob_container)
+    store.put("k.bin", io.BytesIO(b"original"))
+    url = store.url("k.bin", expires_in=60)
+    # A leaked download link must not let anyone overwrite the result.
+    response = httpx.put(url, content=b"tampered",
+                         headers={"x-ms-blob-type": "BlockBlob"})
+    assert response.status_code == 403
+    assert b"".join(store.get("k.bin")) == b"original"
+
+
+def test_blob_public_endpoint_rewrites_the_host(azurite, blob_container):
+    from app.storage.blob import BlobStorage
+
+    store = BlobStorage(azurite, blob_container,
+                        public_endpoint="http://localhost:10000/devstoreaccount1")
+    store.put("k.bin", io.BytesIO(b"x"))
+    url = store.url("k.bin", expires_in=60)
+    assert urlsplit(url).netloc == "localhost:10000"
+    # Still a valid link: the signature does not cover the host name.
+    assert httpx.get(url).content == b"x"
+
+
+# ---------------------------------------------------------------------------
 # Backend selection
 # ---------------------------------------------------------------------------
 
@@ -100,6 +154,22 @@ def test_default_backend_is_local(monkeypatch, tmp_path):
     store = get_storage()
     assert isinstance(store, LocalStorage)
     assert store.root == tmp_path.resolve()
+
+
+def test_blob_backend_requires_a_connection_string(monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "blob")
+    monkeypatch.delenv("AZURE_STORAGE_CONNECTION_STRING", raising=False)
+    with pytest.raises(ValueError, match="AZURE_STORAGE_CONNECTION_STRING"):
+        get_storage()
+
+
+def test_blob_backend_is_selected_by_env(monkeypatch, azurite, blob_container):
+    from app.storage.blob import BlobStorage
+
+    monkeypatch.setenv("STORAGE_BACKEND", "blob")
+    monkeypatch.setenv("AZURE_STORAGE_CONNECTION_STRING", azurite)
+    monkeypatch.setenv("STORAGE_CONTAINER", blob_container)
+    assert isinstance(get_storage(), BlobStorage)
 
 
 def test_unknown_backend_is_rejected(monkeypatch):

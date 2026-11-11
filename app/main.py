@@ -22,7 +22,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from PIL import Image, UnidentifiedImageError
 
 from app import config, jobs, metrics, tracing
@@ -434,8 +434,15 @@ def job_result(job_id: str):
             status_code=409,
             detail="job is not completed (status: {})".format(job.status),
         )
+    storage = get_storage()
+    # If the backend can hand out a direct, time-limited link (Blob SAS),
+    # send the client there: a large video then never passes through this
+    # service. Otherwise (local disk) stream the bytes ourselves.
+    direct_url = storage.url(job.output_key, expires_in=config.result_url_ttl_seconds())
+    if direct_url:
+        return RedirectResponse(direct_url, status_code=307)
     try:
-        chunks = get_storage().get(job.output_key)
+        chunks = storage.get(job.output_key)
     except StorageNotFound:
         # The job says completed but the file is gone, e.g. removed from the
         # storage backend by hand. Report it rather than serving an error page.

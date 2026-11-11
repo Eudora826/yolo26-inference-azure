@@ -177,7 +177,11 @@ Everything is an environment variable — no rebuild needed.
 | `RATE_LIMIT_PER_MINUTE` | `0` *(disabled)* | Per-client limit on inference endpoints |
 | `MAX_UPLOAD_MB` | `20` | Image upload size limit |
 | `MAX_VIDEO_UPLOAD_MB` | `200` | Video upload size limit |
-| `STORAGE_BACKEND` | `local` | Where video inputs and results are kept (`local` only for now; Azure Blob is in progress) |
+| `STORAGE_BACKEND` | `local` | Where video inputs and results are kept: `local` (disk) or `blob` (Azure Blob / Azurite) |
+| `AZURE_STORAGE_CONNECTION_STRING` | *(empty)* | Required for `blob`. A secret on real Azure: keep it in `.env`, never in git |
+| `STORAGE_CONTAINER` | `videos` | Blob container for job files |
+| `AZURE_STORAGE_PUBLIC_ENDPOINT` | *(empty)* | Blob endpoint as clients see it, when it differs from the service's (Compose + Azurite) |
+| `RESULT_URL_TTL_SECONDS` | `900` | Lifetime of the read-only SAS link that `/jobs/{id}/result` redirects to on `blob` |
 | `JOBS_DIR` | system temp dir | Root directory of the `local` storage backend |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(empty = tracing off)* | OTLP gRPC endpoint, `host:port`, no scheme |
 | `OTEL_SERVICE_NAME` | `yolo-inference-platform` | Name reported to the tracing backend |
@@ -281,7 +285,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 > just executes it.
 
 ```bash
-pytest -q                                   # 34 tests, no skips
+pytest -q                                   # Blob tests skip unless Azurite runs (see below)
 ruff check .
 python -m uvicorn app.main:app --reload     # run the service locally
 ```
@@ -296,6 +300,30 @@ That mounts `./app` into the container. On Windows the file-change events do
 not cross the container boundary, hence `WATCHFILES_FORCE_POLLING=true` in
 the dev override.
 
+### Blob storage with Azurite
+
+Video jobs can keep their files in Azure Blob instead of local disk. Locally
+this runs against [Azurite](https://github.com/Azure/Azurite), Microsoft's
+Blob emulator, so no Azure account is needed:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.azurite.yml up --build
+```
+
+With `STORAGE_BACKEND=blob`, `GET /jobs/{id}/result` answers with a 307
+redirect to a read-only SAS link that expires after 15 minutes, so large
+videos are downloaded from Blob directly instead of through the service.
+
+To run the Blob tests outside Compose, start the emulator first:
+
+```bash
+docker run -d --name azurite -p 10000:10000 mcr.microsoft.com/azure-storage/azurite:3.37.0 azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck --loose
+```
+
+Known limits: job records still live in memory (a restart forgets them,
+replicas do not share them), finished jobs are never cleaned up, and the
+SAS links are signed with the account key rather than a managed identity.
+
 ---
 
 ## Project layout
@@ -304,7 +332,7 @@ the dev override.
 app/            the service — routes, detector, jobs, metrics, tracing
 deploy/         prometheus, grafana provisioning, otel collector config
 loadgen/        traffic generator (compose profile "demo")
-tests/          34 tests, including instrumentation and span assertions
+tests/          64 tests, including span assertions and Blob tests against Azurite
 docs/images/    screenshots used in this README
 ```
 

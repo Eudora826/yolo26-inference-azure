@@ -43,7 +43,20 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Download model weights
         run: wget -q "$WEIGHTS_URL"
+      # The Blob storage tests run against Azurite, the local emulator. Started
+      # with docker run rather than as a service container, because the
+      # emulator needs command-line flags and services cannot set a command.
+      - name: Start Azurite
+        run: |
+          docker run -d --name azurite -p 10000:10000 \
+            mcr.microsoft.com/azure-storage/azurite:3.37.0 \
+            azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck --loose
       - name: Run tests
+        # Locally the Blob tests skip when Azurite is not running; here a
+        # missing emulator must fail the build instead. A test that always
+        # skips is a test that does not exist.
+        env:
+          REQUIRE_AZURITE: "1"
         run: pytest -q
 
   build:

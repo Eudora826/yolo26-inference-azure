@@ -36,8 +36,31 @@ def rate_limit_per_minute() -> int:
 
 
 def storage_backend() -> str:
-    """Where job files are kept: "local" (the default)."""
+    """Where job files are kept: "local" (the default) or "blob"."""
     return os.getenv("STORAGE_BACKEND", "local").strip().lower()
+
+
+def azure_storage_connection_string() -> str:
+    """Connection string for the blob backend. A secret on real Azure: it
+    belongs in .env (git-ignored) or the platform's secret store, never in
+    a committed file. The Azurite one is a published development key."""
+    return os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
+
+def storage_container() -> str:
+    """Blob container that holds the job files."""
+    return os.getenv("STORAGE_CONTAINER", "videos")
+
+
+def azure_storage_public_endpoint() -> str:
+    """Blob endpoint as clients see it, when it differs from the one the
+    service uses (Docker Compose + Azurite). Empty on Azure."""
+    return os.getenv("AZURE_STORAGE_PUBLIC_ENDPOINT", "")
+
+
+def result_url_ttl_seconds() -> int:
+    """How long a direct download link for a job result stays valid."""
+    return int(os.getenv("RESULT_URL_TTL_SECONDS", "900"))
 
 
 def jobs_dir() -> str:

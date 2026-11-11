@@ -12,6 +12,8 @@ prometheus-client==0.21.1
 # are someone else's implementation detail.
 numpy==1.26.4
 opencv-python==4.10.0.84
+# Azure Blob storage backend (STORAGE_BACKEND=blob); imported only when used.
+azure-storage-blob==12.31.0
 # Tracing. Versions must match: core 1.X.0 <-> instrumentation 0.(X+21)b0.
 # Only -api is a hard dependency (small, pure Python); the rest is imported
 # lazily inside tracing.setup().
